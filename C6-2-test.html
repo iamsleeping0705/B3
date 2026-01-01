@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>元素特工：物質分析行動</title>
+    <style>
+        /* 全域設定 */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #2c3e50; /* 深藍灰背景 */
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            touch-action: none; /* 禁止預設觸控行為 */
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 登入介面 */
+        #loginOverlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.98);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            width: 320px;
+            z-index: 100;
+        }
+
+        #loginOverlay h1 {
+            color: #2c3e50;
+            margin: 0 0 20px 0;
+            font-size: 24px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            border-color: #3498db;
+        }
+
+        button {
+            background: linear-gradient(135deg, #ff6b6b, #ee5253);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            box-shadow: 0 4px 15px rgba(238, 82, 83, 0.4);
+            transition: transform 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+        
+        /* 頁尾署名 */
+        .footer-credit {
+            font-size: 12px;
+            color: #95a5a6;
+            margin-top: 20px;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 登入介面 -->
+    <div id="loginOverlay">
+        <h1>🧪 元素分析任務</h1>
+        <div class="input-group">
+            <label>班級 (例如: 211)</label>
+            <input type="number" id="classId" placeholder="輸入班級">
+        </div>
+        <div class="input-group">
+            <label>座號 (例如: 051321)</label>
+            <input type="text" id="seatId" placeholder="輸入座號串 (如051321)">
+        </div>
+        <button onclick="startGame()">啟動任務</button>
+        <p style="font-size: 12px; color: #7f8c8d; margin-top: 15px;">
+            請使用 iPad 橫向操作<br>拖曳配對．建立檔案
+        </p>
+        <div class="footer-credit">
+            sleeping與Gemini設計<br>2026.南一
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * 遊戲資料庫
+ */
+const elementsDB = [
+    { id: 'Al', name: '鋁', isMetal: true,  desc: '與氧反應形成緻密氧化層保護內部，合金密度小且堅硬，用於航太產業(飛機)。' },
+    { id: 'Au', name: '金', isMetal: true,  desc: '性質安定、不易與氧反應，延展性最佳的金屬，常用來製造飾物。' },
+    { id: 'Fe', name: '鐵', isMetal: true,  desc: '易生鏽，需電鍍或製成合金。煉鋼後可製成不鏽鋼，用於製造餐具廚具。' },
+    { id: 'Cu', name: '銅', isMetal: true,  desc: '紅色金屬，導電性佳僅次於銀，製作電線，與鋅製成合金稱為黃銅。' },
+    { id: 'Ti', name: '鈦', isMetal: true,  desc: '氧化物為白色粉末，無毒性，可製成修正帶及防晒乳等產品。' },
+    { id: 'S',  name: '硫', isMetal: false, desc: '無臭無味質脆的黃色固體，存在於火山口與溫泉區，可製火藥。' },
+    { id: 'Si', name: '矽', isMetal: false, desc: '地殼中含量第二大，導電性介於導體與絕緣體之間，半導體工業核心。' },
+    { id: 'C',  name: '碳', isMetal: false, desc: '結構不同組成不同物質(同素異形體)，例如：石墨、鑽石和芙。' }
+];
+
+// 遊戲狀態變數
+let canvas, ctx;
+let gameState = 'LOGIN'; // 狀態: LOGIN, LEVEL1, LEVEL1_END, LEVEL2, LEVEL2_RESULT
+let level1Score = 0;
+let level2Score = 0;
+let finalScore = 0;
+
+let timer = 0;
+let timerInterval;
+let level1Mistakes = []; 
+let playerInfo = { class: '', seats: '' };
+
+// 拖曳系統變數
+let dragItem = null;
+let touchOffset = { x: 0, y: 0 };
+
+// Level 1 專用變數
+let level1Queue = []; 
+let fallingItems = [];
+let spawnTimer = 0;
+let level1FinishedSpawning = false;
+
+// Level 2 專用變數
+let slots = [];
+let cards = [];
+let level2Submitted = false;
+let submitBtn = { x: 0, y: 0, w: 160, h: 50 }; // 送出按鈕
+let level2Feedback = []; // 儲存錯誤回饋
+
+// 浮動提示文字
+let feedbacks = [];
+
+// 初始化
+window.onload = function() {
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    
+    // 綁定事件
+    const events = ['mousedown', 'touchstart'];
+    events.forEach(evt => canvas.addEventListener(evt, handleStart, {passive: false}));
+    
+    const moveEvents = ['mousemove', 'touchmove'];
+    moveEvents.forEach(evt => canvas.addEventListener(evt, handleMove, {passive: false}));
+    
+    const endEvents = ['mouseup', 'touchend'];
+    endEvents.forEach(evt => canvas.addEventListener(evt, handleEnd, {passive: false}));
+    
+    requestAnimationFrame(gameLoop);
+};
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // 若在 Level 2 旋轉螢幕，重新計算按鈕位置以免跑版
+    if(gameState === 'LEVEL2' || gameState === 'LEVEL2_RESULT') {
+        submitBtn.x = canvas.width / 2 - submitBtn.w / 2;
+        submitBtn.y = canvas.height - 80;
+    }
+}
+
+function startGame() {
+    const classInput = document.getElementById('classId').value;
+    const seatInput = document.getElementById('seatId').value;
+    
+    if (!classInput || !seatInput) {
+        alert("請輸入完整的班級與座號！");
+        return;
+    }
+    
+    playerInfo.class = classInput;
+    playerInfo.seats = seatInput;
+    
+    document.getElementById('loginOverlay').classList.add('hidden');
+    startLevel1();
+}
+
+// ==========================================
+// Level 1: 分類特訓 (速度調慢)
+// ==========================================
+
+function startLevel1() {
+    gameState = 'LEVEL1';
+    level1Score = 40; // 滿分40，採扣分制
+    fallingItems = [];
+    level1Mistakes = [];
+    level1FinishedSpawning = false;
+    
+    // 1. 建立佇列 (不重複)
+    level1Queue = [];
+    elementsDB.forEach(el => {
+        level1Queue.push({ id: el.id, text: el.name, type: 'name', isMetal: el.isMetal });
+        level1Queue.push({ id: el.id, text: el.id,   type: 'symbol', isMetal: el.isMetal });
+    });
+    
+    // 洗牌
+    level1Queue.sort(() => Math.random() - 0.5);
+    
+    timer = 60; 
+    if(timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        timer--;
+        if (timer <= 0) {
+            clearInterval(timerInterval);
+            showFloatingText("時間到！進入第二關", canvas.width/2, canvas.height/2, '#ff4757');
+            setTimeout(startLevel2, 2000);
+        }
+    }, 1000);
+}
+
+// ==========================================
+// Level 2: 物質檔案 (送出計分制 + 訂正回饋)
+// ==========================================
+
+function startLevel2() {
+    gameState = 'LEVEL2';
+    level2Score = 0; // 結算時計算
+    level2Submitted = false;
+    level2Feedback = [];
+    timer = 300; // 5分鐘
+    
+    if(timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        timer--;
+        if (timer <= 0) {
+            // 時間到自動送出
+            evaluateLevel2();
+        }
+    }, 1000);
+    
+    initLevel2Objects();
+}
+
+function initLevel2Objects() {
+    slots = [];
+    cards = [];
+    
+    const W = canvas.width;
+    const H = canvas.height;
+    
+    // 版面規劃
+    const topMargin = 110;
+    const bottomMargin = 120;
+    const workspaceH = H - topMargin - bottomMargin;
+    
+    const slotW = W * 0.42; 
+    const slotH = Math.min(120, workspaceH / 5.2);
+    const gapY = 8;
+    
+    // 左側 (金屬區 - 5格)
+    for (let i = 0; i < 5; i++) {
+        slots.push({
+            x: W * 0.04,
+            y: topMargin + i * (slotH + gapY),
+            w: slotW, h: slotH,
+            type: 'metal',
+            contents: { name: null, symbol: null, desc: null } 
+        });
+    }
+    
+    // 右側 (非金屬區 - 5格)
+    for (let i = 0; i < 5; i++) {
+        slots.push({
+            x: W * 0.54,
+            y: topMargin + i * (slotH + gapY),
+            w: slotW, h: slotH,
+            type: 'non-metal',
+            contents: { name: null, symbol: null, desc: null }
+        });
+    }
+    
+    // 送出按鈕位置
+    submitBtn.x = W / 2 - submitBtn.w / 2;
+    submitBtn.y = H - 60;
+    
+    // 產生卡片 - 散落在下方與側邊
+    const deckY = H - 100;
+    const deckW = W;
+    
+    elementsDB.forEach(el => {
+        cards.push(createCard(el.id, el.name, 'name', deckY, deckW));
+        cards.push(createCard(el.id, el.id, 'symbol', deckY, deckW));
+        cards.push(createCard(el.id, el.desc, 'desc', deckY, deckW));
+    });
+}
+
+function createCard(id, text, type, deckY, deckW) {
+    let w, h, color, textColor;
+    
+    if (type === 'name') {
+        w = 60; h = 40;
+        color = '#3498db'; 
+        textColor = '#fff';
+    } else if (type === 'symbol') {
+        w = 60; h = 40;
+        color = '#f1c40f'; 
+        textColor = '#2c3e50';
+    } else {
+        w = 200; h = 50;
+        color = '#ecf0f1'; 
+        textColor = '#2c3e50';
+    }
+
+    return {
+        id: id,
+        text: text,
+        type: type,
+        // 隨機分布，避開按鈕
+        x: Math.random() > 0.5 ? 20 + Math.random() * (deckW/2 - 100) : deckW/2 + 100 + Math.random() * (deckW/2 - 140),
+        y: deckY + Math.random() * 50,
+        w: w, h: h,
+        color: color,
+        textColor: textColor,
+        slotIndex: -1 
+    };
+}
+
+// ==========================================
+// Level 2 評分系統 (含錯題分析)
+// ==========================================
+
+function evaluateLevel2() {
+    if(level2Submitted) return;
+    level2Submitted = true;
+    clearInterval(timerInterval);
+    
+    level2Feedback = [];
+    
+    // 檢查每一個插槽
+    slots.forEach((slot, index) => {
+        // 檢查插槽是否有內容
+        let hasContent = slot.contents.name || slot.contents.symbol || slot.contents.desc;
+        if (!hasContent) return;
+        
+        // 找出插槽的「主要元素 ID」
+        let mainId = slot.contents.name || slot.contents.symbol;
+        if (!mainId && slot.contents.desc) mainId = slot.contents.desc; 
+        
+        if (!mainId) return;
+        
+        let elData = elementsDB.find(e => e.id === mainId);
+        let slotIsCorrect = true;
+        let mistakes = [];
+        
+        // 1. 檢查分類
+        const isMetalSlot = slot.type === 'metal';
+        if (elData.isMetal !== isMetalSlot) {
+            slotIsCorrect = false;
+            mistakes.push("區域分類錯誤");
+        }
+        
+        // 2. 檢查卡片匹配
+        if (slot.contents.name !== mainId) mistakes.push(slot.contents.name ? "中文名稱不符" : "缺中文名稱");
+        if (slot.contents.symbol !== mainId) mistakes.push(slot.contents.symbol ? "符號不符" : "缺符號");
+        if (slot.contents.desc !== mainId) mistakes.push(slot.contents.desc ? "性質不符" : "缺性質");
+
+        if (mistakes.length > 0) slotIsCorrect = false;
+
+        if (!slotIsCorrect) {
+            // 存入正確答案資訊以便顯示
+            level2Feedback.push({
+                element: elData.name,
+                symbol: elData.id,
+                category: elData.isMetal ? '金屬' : '非金屬',
+                desc: elData.desc, 
+                mistakes: mistakes
+            });
+        }
+    });
+
+    // 計算分數 (每正確一張卡片 2.5 分)
+    let totalCardsCorrect = 0;
+    slots.forEach(slot => {
+         let mainId = slot.contents.name || slot.contents.symbol || slot.contents.desc;
+         if(!mainId) return;
+         let elData = elementsDB.find(e => e.id === mainId);
+         const isMetalSlot = slot.type === 'metal';
+         
+         if(elData.isMetal === isMetalSlot) {
+             if(slot.contents.name === mainId) totalCardsCorrect++;
+             if(slot.contents.symbol === mainId) totalCardsCorrect++;
+             if(slot.contents.desc === mainId) totalCardsCorrect++;
+         }
+    });
+    
+    level2Score = Math.floor(totalCardsCorrect * 2.5);
+    finalScore = Math.max(0, level1Score + level2Score);
+    
+    gameState = 'LEVEL2_RESULT';
+}
+
+// ==========================================
+// 遊戲迴圈
+// ==========================================
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+function update() {
+    // 浮動文字動畫
+    for (let i = feedbacks.length - 1; i >= 0; i--) {
+        let f = feedbacks[i];
+        f.y -= 1;
+        f.life--;
+        if (f.life <= 0) feedbacks.splice(i, 1);
+    }
+
+    if (gameState === 'LEVEL1') {
+        if (level1Queue.length > 0) {
+            spawnTimer++;
+            if (spawnTimer > 45 || fallingItems.length === 0) {
+                let itemData = level1Queue.pop(); 
+                fallingItems.push({
+                    ...itemData, 
+                    x: Math.random() * (canvas.width - 100) + 50,
+                    y: -60,
+                    r: 35, 
+                    vx: (Math.random() - 0.5) * 1, 
+                    // [速度調整] 變慢: 0.8 + 隨機
+                    vy: 0.8 + Math.random() * 0.5, 
+                    isDragging: false
+                });
+                spawnTimer = 0;
+            }
+        } else {
+            level1FinishedSpawning = true;
+            if (fallingItems.length === 0 && !dragItem) {
+                setTimeout(startLevel2, 500);
+            }
+        }
+        
+        fallingItems.forEach(item => {
+            if (!item.isDragging) {
+                item.y += item.vy;
+                item.x += item.vx;
+                if(item.x < item.r || item.x > canvas.width - item.r) item.vx *= -1;
+                if (item.y > canvas.height + 50) {
+                    item.y = -50;
+                    item.x = Math.random() * (canvas.width - 100) + 50;
+                }
+            }
+        });
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // 背景
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (gameState === 'LEVEL1') {
+        drawLevel1();
+    } else if (gameState === 'LEVEL2') {
+        drawLevel2();
+    } else if (gameState === 'LEVEL2_RESULT') {
+        drawLevel2Result();
+    }
+    
+    // 浮動文字
+    feedbacks.forEach(f => {
+        ctx.globalAlpha = Math.min(1, f.life / 20);
+        ctx.fillStyle = f.color;
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(f.text, f.x, f.y);
+        ctx.globalAlpha = 1;
+    });
+}
+
+// ------------------------------------------
+// Level 1 繪製
+// ------------------------------------------
+function drawLevel1() {
+    ctx.fillStyle = '#ecf0f1';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`剩餘時間: ${timer}s`, 20, 40);
+    ctx.textAlign = 'right';
+    ctx.fillText(`第一關分數: ${level1Score}`, canvas.width - 20, 40);
+    
+    ctx.textAlign = 'center';
+    ctx.font = '24px Arial';
+    ctx.fillText(`第一關：物質分類 (剩餘物件: ${level1Queue.length + fallingItems.length})`, canvas.width/2, 40);
+
+    const binW = 220;
+    const binH = 160;
+    const binY = canvas.height - 180;
+    
+    // 金屬區
+    ctx.fillStyle = 'rgba(52, 152, 219, 0.2)';
+    ctx.strokeStyle = '#3498db';
+    ctx.lineWidth = 4;
+    ctx.fillRect(20, binY, binW, binH);
+    ctx.strokeRect(20, binY, binW, binH);
+    ctx.fillStyle = '#3498db';
+    ctx.font = 'bold 30px Arial';
+    ctx.fillText("金屬區", 20 + binW/2, binY + binH/2);
+    
+    // 非金屬區
+    ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
+    ctx.strokeStyle = '#2ecc71';
+    ctx.fillRect(canvas.width - 20 - binW, binY, binW, binH);
+    ctx.strokeRect(canvas.width - 20 - binW, binY, binW, binH);
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillText("非金屬區", canvas.width - 20 - binW/2, binY + binH/2);
+
+    fallingItems.forEach(item => {
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, item.r, 0, Math.PI * 2);
+        ctx.fillStyle = item.type === 'name' ? '#ffffff' : '#f1c40f';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = item.type === 'symbol' ? 'bold 28px Arial' : 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.text, item.x, item.y);
+    });
+}
+
+// ------------------------------------------
+// Level 2 繪製
+// ------------------------------------------
+function drawLevel2() {
+    // 頂部資訊列
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(0, 0, canvas.width, 100);
+    
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'left';
+    // [修改] 顯示雙語
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText(`學習目標：將卡片拖至 金屬(Metal) 或 非金屬(Non-metal) 區域`, 20, 35);
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#bdc3c7';
+    ctx.fillText(`計分說明：全部排好後按下方「送出答案」才計分。放錯可隨時拿出來修改。`, 20, 70);
+
+    ctx.fillStyle = '#f1c40f';
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText(`時間: ${Math.floor(timer/60)}:${(timer%60).toString().padStart(2,'0')}`, canvas.width - 20, 50);
+
+    // 繪製插槽
+    slots.forEach(slot => {
+        ctx.lineWidth = 2;
+        if(slot.type === 'metal') {
+            ctx.fillStyle = 'rgba(52, 152, 219, 0.1)';
+            ctx.strokeStyle = '#3498db';
+        } else {
+            ctx.fillStyle = 'rgba(46, 204, 113, 0.1)';
+            ctx.strokeStyle = '#2ecc71';
+        }
+        
+        ctx.fillRect(slot.x, slot.y, slot.w, slot.h);
+        ctx.strokeRect(slot.x, slot.y, slot.w, slot.h);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        ctx.font = 'bold 40px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(slot.type === 'metal' ? 'Metal' : 'Non-M', slot.x + slot.w/2, slot.y + slot.h/2);
+    });
+
+    // 繪製卡片
+    const drawList = [
+        ...cards.filter(c => !c.isDragging),
+        ...cards.filter(c => c.isDragging)
+    ];
+
+    drawList.forEach(card => {
+        if(card.isDragging) {
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetY = 10;
+        } else {
+            ctx.shadowColor = 'transparent';
+        }
+
+        ctx.fillStyle = card.color;
+        roundRect(ctx, card.x, card.y, card.w, card.h, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = card.textColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'transparent';
+
+        if(card.type === 'desc') {
+            ctx.font = '14px Arial'; 
+            wrapText(ctx, card.text, card.x + card.w/2, card.y + 14, card.w - 10, 16);
+        } else if (card.type === 'symbol') {
+            ctx.font = 'bold 22px Arial';
+            ctx.fillText(card.text, card.x + card.w/2, card.y + card.h/2);
+        } else {
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText(card.text, card.x + card.w/2, card.y + card.h/2);
+        }
+    });
+    
+    // 繪製送出按鈕
+    drawSubmitButton();
+}
+
+function drawSubmitButton() {
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 3;
+    
+    ctx.fillStyle = '#e74c3c';
+    roundRect(ctx, submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h, 25);
+    ctx.fill();
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText("送出答案", submitBtn.x + submitBtn.w/2, submitBtn.y + submitBtn.h/2);
+    
+    ctx.shadowColor = 'transparent';
+}
+
+function drawLevel2Result() {
+    // 繪製背景 (Level 2 的畫面變暗)
+    drawLevel2(); 
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+    
+    // 結果面板
+    const pW = Math.min(600, canvas.width - 40);
+    const pH = Math.min(500, canvas.height - 40);
+    const pX = (canvas.width - pW) / 2;
+    const pY = (canvas.height - pH) / 2;
+    
+    ctx.fillStyle = '#fff';
+    roundRect(ctx, pX, pY, pW, pH, 20);
+    ctx.fill();
+    
+    // 標題
+    ctx.fillStyle = '#2c3e50';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 32px Arial';
+    ctx.fillText("任務結算", canvas.width/2, pY + 50);
+    
+    // 分數
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText(`第一關: ${level1Score} / 40`, canvas.width/2, pY + 100);
+    ctx.fillText(`第二關: ${level2Score} / 60`, canvas.width/2, pY + 140);
+    
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 40px Arial';
+    ctx.fillText(`總分: ${finalScore}`, canvas.width/2, pY + 200);
+    
+    // 錯誤回饋
+    ctx.textAlign = 'left';
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#333';
+    
+    let startFY = pY + 250;
+    if (level2Feedback.length === 0) {
+        ctx.fillStyle = '#2ecc71';
+        ctx.textAlign = 'center';
+        ctx.fillText("完美達成！全部分析正確！", canvas.width/2, startFY);
+    } else {
+        ctx.fillText("⚠️ 訂正回饋 (正確性質摘要)：", pX + 40, startFY);
+        startFY += 30;
+        ctx.font = '16px Arial';
+        
+        const displayLimit = Math.min(level2Feedback.length, 5);
+        for(let i=0; i<displayLimit; i++) {
+            let fb = level2Feedback[i];
+            ctx.fillStyle = '#c0392b';
+            
+            // 顯示正確答案與性質摘要
+            let errorText = fb.mistakes.join('、');
+            let shortProp = fb.desc.substring(0, 12) + "...";
+            
+            ctx.fillText(`● ${fb.element}(${fb.symbol})[${fb.category}]: ${shortProp}`, pX + 40, startFY + i*28);
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillText(`   (錯: ${errorText})`, pX + 40 + 350, startFY + i*28); 
+        }
+        if(level2Feedback.length > 5) {
+             ctx.fillStyle = '#7f8c8d';
+             ctx.fillText(`...還有 ${level2Feedback.length - 5} 個錯誤`, pX + 40, startFY + 5*28);
+        }
+    }
+    
+    // 完成按鈕 (上傳)
+    const btnY = pY + pH - 60;
+    ctx.fillStyle = '#3498db';
+    roundRect(ctx, canvas.width/2 - 80, btnY, 160, 45, 22);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText("上傳成績", canvas.width/2, btnY + 28);
+}
+
+// ==========================================
+// 互動處理
+// ==========================================
+
+function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: x - rect.left, y: y - rect.top };
+}
+
+function handleStart(e) {
+    e.preventDefault();
+    const pos = getPos(e);
+    
+    if (gameState === 'LEVEL1') {
+        for (let i = fallingItems.length - 1; i >= 0; i--) {
+            let item = fallingItems[i];
+            let dist = Math.sqrt((pos.x - item.x)**2 + (pos.y - item.y)**2);
+            if (dist < item.r + 20) { 
+                dragItem = item;
+                item.isDragging = true;
+                touchOffset = { x: pos.x - item.x, y: pos.y - item.y };
+                break;
+            }
+        }
+    } else if (gameState === 'LEVEL2') {
+        if (pos.x > submitBtn.x && pos.x < submitBtn.x + submitBtn.w &&
+            pos.y > submitBtn.y && pos.y < submitBtn.y + submitBtn.h) {
+            evaluateLevel2();
+            return;
+        }
+
+        for (let i = cards.length - 1; i >= 0; i--) {
+            let card = cards[i];
+            if (pos.x > card.x && pos.x < card.x + card.w &&
+                pos.y > card.y && pos.y < card.y + card.h) {
+                dragItem = card;
+                card.isDragging = true;
+                touchOffset = { x: pos.x - card.x, y: pos.y - card.y };
+                
+                if(card.slotIndex !== -1) {
+                    let slot = slots[card.slotIndex];
+                    if(slot.contents.name === card.id) slot.contents.name = null;
+                    if(slot.contents.symbol === card.id) slot.contents.symbol = null;
+                    if(slot.contents.desc === card.id) slot.contents.desc = null;
+                    card.slotIndex = -1;
+                }
+                break;
+            }
+        }
+    } else if (gameState === 'LEVEL2_RESULT') {
+        if (Math.abs(pos.x - canvas.width/2) < 80 && pos.y > (canvas.height/2 + 250 - 60) && pos.y < (canvas.height/2 + 250)) {
+            submitScore();
+        }
+    }
+}
+
+function handleMove(e) {
+    e.preventDefault();
+    if (!dragItem) return;
+    const pos = getPos(e);
+    dragItem.x = pos.x - touchOffset.x;
+    dragItem.y = pos.y - touchOffset.y;
+}
+
+function handleEnd(e) {
+    e.preventDefault();
+    if (!dragItem) return;
+    
+    if (gameState === 'LEVEL1') {
+        checkLevel1Drop(dragItem);
+    } else if (gameState === 'LEVEL2') {
+        checkLevel2Drop(dragItem);
+    }
+    dragItem.isDragging = false;
+    dragItem = null;
+}
+
+// ==========================================
+// 判定與回饋
+// ==========================================
+
+function showFloatingText(text, x, y, color='#fff') {
+    feedbacks.push({ text: text, x: x, y: y, life: 60, color: color });
+}
+
+function checkLevel1Drop(item) {
+    const binW = 220; const binH = 160; const binY = canvas.height - 180;
+    
+    if (item.x > 20 && item.x < 20 + binW && item.y > binY && item.y < binY + binH) {
+        if (item.isMetal) {
+            removeFallingItem(item); showFloatingText("O", item.x, item.y, '#2ecc71');
+        } else {
+            level1Score = Math.max(0, level1Score - 2); 
+            showFloatingText("X", item.x, item.y, '#e74c3c');
+            level1Mistakes.push(item.text); item.y = 50; 
+        }
+    } else if (item.x > canvas.width - 20 - binW && item.x < canvas.width - 20 && item.y > binY && item.y < binY + binH) {
+        if (!item.isMetal) {
+            removeFallingItem(item); showFloatingText("O", item.x, item.y, '#2ecc71');
+        } else {
+            level1Score = Math.max(0, level1Score - 2);
+            showFloatingText("X", item.x, item.y, '#e74c3c');
+            level1Mistakes.push(item.text); item.y = 50;
+        }
+    }
+}
+
+function removeFallingItem(item) {
+    const idx = fallingItems.indexOf(item);
+    if (idx > -1) fallingItems.splice(idx, 1);
+}
+
+function checkLevel2Drop(card) {
+    let hitSlot = null; let hitIndex = -1;
+    for (let i = 0; i < slots.length; i++) {
+        let s = slots[i];
+        if (card.x + card.w/2 > s.x && card.x + card.w/2 < s.x + s.w &&
+            card.y + card.h/2 > s.y && card.y + card.h/2 < s.y + s.h) {
+            hitSlot = s; hitIndex = i; break;
+        }
+    }
+    
+    if (hitSlot) {
+        // 防止重疊
+        if (card.type === 'name' && hitSlot.contents.name) return;
+        if (card.type === 'symbol' && hitSlot.contents.symbol) return;
+        if (card.type === 'desc' && hitSlot.contents.desc) return;
+        
+        if (card.type === 'name') {
+            card.x = hitSlot.x + 10; card.y = hitSlot.y + 10; hitSlot.contents.name = card.id;
+        } else if (card.type === 'symbol') {
+            card.x = hitSlot.x + hitSlot.w - card.w - 10; card.y = hitSlot.y + 10; hitSlot.contents.symbol = card.id;
+        } else if (card.type === 'desc') {
+            card.w = hitSlot.w - 20; card.x = hitSlot.x + 10; card.y = hitSlot.y + 55; hitSlot.contents.desc = card.id;
+        }
+        card.slotIndex = hitIndex;
+    }
+}
+
+// ------------------------------------------
+// Google Sheet 上傳串接設定
+// ------------------------------------------
+function submitScore() {
+    // 【重要】請將下行引號內的文字替換為您的 Web App URL
+    const scriptURL = 'googlesheet網址輸入地方'; 
+
+    if(scriptURL.includes('請在此填入')) {
+         alert("老師尚未設定後端網址！請見教學文件。");
+         return;
+    }
+
+    // 格式化錯題訊息
+    let mistakeStr = "";
+    if(level1Mistakes.length > 0) {
+        let uniqueL1 = [...new Set(level1Mistakes)];
+        mistakeStr += "L1: " + uniqueL1.join("、") + "; ";
+    }
+    if(level2Feedback.length > 0) {
+        mistakeStr += "L2: ";
+        level2Feedback.forEach(fb => {
+             let errs = fb.mistakes.join(",");
+             mistakeStr += `${fb.element}(${errs}) `;
+        });
+    }
+    if(mistakeStr === "") mistakeStr = "無錯題";
+
+    const formData = new FormData();
+    formData.append('class', playerInfo.class);
+    formData.append('seats', playerInfo.seats);
+    formData.append('level1', level1Score);
+    formData.append('level2', level2Score);
+    formData.append('score', finalScore);
+    formData.append('mistakes', mistakeStr);
+
+    fetch(scriptURL, {
+        method: 'POST',
+        body: formData,
+        mode: 'no-cors' 
+    })
+    .then(() => {
+        alert(`成績已送出！\n班級: ${playerInfo.class}\n分數: ${finalScore}`);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('傳送失敗，請檢查網路連線。');
+    });
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    let words = text.split(''); let line = '';
+    for(let n = 0; n < words.length; n++) {
+        let testLine = line + words[n];
+        let metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && n > 0) {
+            ctx.fillText(line, x, y); line = words[n]; y += lineHeight;
+        } else { line = testLine; }
+    }
+    ctx.fillText(line, x, y);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    if (w < 2 * r) r = w / 2; if (h < 2 * r) r = h / 2;
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+</script>
+</body>
+</html>
