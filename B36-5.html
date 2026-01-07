@@ -30,6 +30,13 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+        @keyframes pulse-red {
+            0%, 100% { color: #ef4444; }
+            50% { color: #b91c1c; }
+        }
+        .animate-pulse-red {
+            animation: pulse-red 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
     </style>
 </head>
 <body class="bg-slate-100">
@@ -38,9 +45,46 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
+        /**
+         * ============================================================================
+         * 【Google Apps Script 設定教學：分關卡詳細紀錄】
+         * * 請將以下程式碼貼入您的 Google Apps Script 編輯器中 (取代原有的 myFunction)：
+         * * function doPost(e) {
+         * var ss = SpreadsheetApp.getActiveSpreadsheet();
+         * var data = JSON.parse(e.postData.contents);
+         * var className = data.classId || "未分類"; 
+         * * // 1. 嘗試依照班級名稱取得分頁
+         * var sheet = ss.getSheetByName(className);
+         * * // 2. 如果分頁不存在，就自動建立新分頁並加入標題
+         * if (!sheet) {
+         * sheet = ss.insertSheet(className);
+         * // 設定標題列：時間、班級、座號、總分、第一關錯誤、第二關錯誤
+         * sheet.appendRow(["時間", "班級", "座號", "總分", "第一關錯誤回饋", "第二關錯誤回饋"]); 
+         * }
+         * * // 3. 寫入資料
+         * sheet.appendRow([
+         * data.timestamp, 
+         * data.classId, 
+         * data.seatId, 
+         * data.score, 
+         * data.mistakesLevel1, // 第一關錯誤詳情
+         * data.mistakesLevel2  // 第二關錯誤詳情
+         * ]);
+         * * return ContentService.createTextOutput("Success");
+         * }
+         * * ============================================================================
+         * 部署步驟：
+         * 1. 貼上程式碼後存檔。
+         * 2. 點選右上角「部署」->「新增部署」。
+         * 3. 類型選擇「網頁應用程式」。
+         * 4. 描述隨意，執行身分選「我 (Me)」，誰可以存取選「所有人 (Anyone)」。
+         * 5. 點選「部署」，複製產生的網址，填入下方的 GOOGLE_SCRIPT_URL 中。
+         * ============================================================================
+         */
+
         // --- 設定區 ---
         // 請將部署好的 Google Apps Script URL 填入下方引號中
-        const GOOGLE_SCRIPT_URL = ""; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzgAKBM7QhgAvTnndDO0-jLDiJiwTqyLAErzQIpkxONRlVTKPiwViWc2X6lh_-TNasykA/exec"; 
 
         // --- 內建圖示元件 (取代 lucide-react) ---
         const IconBase = ({ children, className }) => (
@@ -62,7 +106,8 @@
             Beaker: (props) => <IconBase {...props}><path d="M4.5 3h15"></path><path d="M6 3v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V3"></path><path d="M6 14h12"></path></IconBase>,
             Save: (props) => <IconBase {...props}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></IconBase>,
             AlertTriangle: (props) => <IconBase {...props}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></IconBase>,
-            FastForward: (props) => <IconBase {...props}><polygon points="13 19 22 12 13 5 13 19"></polygon><polygon points="2 19 11 12 2 5 2 19"></polygon></IconBase>
+            FastForward: (props) => <IconBase {...props}><polygon points="13 19 22 12 13 5 13 19"></polygon><polygon points="2 19 11 12 2 5 2 19"></polygon></IconBase>,
+            Clock: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></IconBase>
         };
 
         // --- 模型元件 ---
@@ -181,6 +226,7 @@
             const [mistakeHistory, setMistakeHistory] = useState([]);
             const [submissionStatus, setSubmissionStatus] = useState('idle');
             const [isCombinedSession, setIsCombinedSession] = useState(false);
+            const [timeLeft, setTimeLeft] = useState(0); // 剩餘時間 (秒)
             
             const [draggedItem, setDraggedItem] = useState(null);
             const [items, setItems] = useState([]);
@@ -193,6 +239,28 @@
                 { id: 'compound', label: '化合物', color: 'bg-green-50 border-green-500 text-green-800' },
                 { id: 'mixture', label: '混合物', color: 'bg-orange-50 border-orange-500 text-orange-800' },
             ];
+
+            // 計時器效果
+            useEffect(() => {
+                let timer;
+                if ((screen === 'game-level-1' || screen === 'game-level-2') && timeLeft > 0) {
+                    timer = setInterval(() => {
+                        setTimeLeft((prev) => prev - 1);
+                    }, 1000);
+                } else if (timeLeft === 0 && (screen === 'game-level-1' || screen === 'game-level-2')) {
+                    // 時間到，強制結算
+                    if (screen === 'game-level-1') setScreen('summary-1');
+                    if (screen === 'game-level-2') setScreen('summary-2');
+                }
+                return () => clearInterval(timer);
+            }, [screen, timeLeft]);
+
+            // 格式化時間 mm:ss
+            const formatTime = (seconds) => {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
 
             const handleStart = () => {
                 if (userInfo.classId && userInfo.seatId) {
@@ -208,6 +276,7 @@
                 setScore(100);
                 setMistakeHistory([]);
                 setIsCombinedSession(true);
+                setTimeLeft(90); // 第一關 90 秒
                 setSubmissionStatus('idle');
                 setScreen('game-level-1');
                 setFeedback(null);
@@ -223,6 +292,7 @@
                     setIsCombinedSession(false);
                 }
                 
+                setTimeLeft(150); // 第二關 2 分 30 秒 = 150 秒
                 setSubmissionStatus('idle');
                 setScreen('game-level-2');
                 setFeedback(null);
@@ -236,17 +306,17 @@
 
                 setSubmissionStatus('submitting');
                 
-                let levelLabel = 'Level 2 Only';
-                if (screen === 'summary-1') levelLabel = 'Level 1 Only';
-                if (screen === 'summary-2' && isCombinedSession) levelLabel = 'Full Challenge (L1+L2)';
+                // 整理錯誤回饋
+                const l1Mistakes = mistakeHistory.filter(m => m.level === 1).map(m => `${m.item}(誤:${m.wrong})`).join(", ") || "無";
+                const l2Mistakes = mistakeHistory.filter(m => m.level === 2).map(m => `${m.item}(誤:${m.wrong})`).join(", ") || "無";
 
                 const data = {
-                    timestamp: new Date().toISOString(),
+                    timestamp: new Date().toLocaleString(),
                     classId: userInfo.classId,
                     seatId: userInfo.seatId,
-                    level: levelLabel,
                     score: score,
-                    mistakes: JSON.stringify(mistakeHistory.map(m => m.item))
+                    mistakesLevel1: l1Mistakes,
+                    mistakesLevel2: l2Mistakes
                 };
 
                 try {
@@ -287,7 +357,7 @@
                         setScore(prev => Math.max(0, prev - 2));
                         const binLabel = bins.find(b => b.id === binType).label;
                         const correctLabel = bins.find(b => b.id === draggedItem.type).label;
-                        setMistakeHistory(prev => [...prev, { item: draggedItem.name, wrong: binLabel, correct: correctLabel }]);
+                        setMistakeHistory(prev => [...prev, { level: 1, item: draggedItem.name, wrong: binLabel, correct: correctLabel }]);
                         setFeedback({ type: 'error', msg: '分類錯誤，扣 2 分！' });
                         setTimeout(() => setFeedback(null), 1500);
                     }
@@ -308,7 +378,7 @@
                         setScore(prev => Math.max(0, prev - 2));
                         const targetName = matchingData.find(m => m.id === targetId).name;
                         const correctTarget = matchingData.find(m => m.id === draggedItem.id).name;
-                        setMistakeHistory(prev => [...prev, { item: draggedItem.formula, wrong: `配對給 ${targetName}`, correct: correctTarget }]);
+                        setMistakeHistory(prev => [...prev, { level: 2, item: draggedItem.formula, wrong: `配對給 ${targetName}`, correct: correctTarget }]);
                         setFeedback({ type: 'error', msg: '配對錯誤，扣 2 分！' });
                         setTimeout(() => setFeedback(null), 1500);
                     }
@@ -545,9 +615,15 @@
                                 </button>
                                 Level 1: 物質分類工廠
                             </div>
-                            <div className="font-black text-xl md:text-2xl text-blue-600 flex items-center gap-2">
-                                <div className="text-sm font-normal text-slate-400">目前得分:</div>
-                                {score}
+                            <div className="flex items-center gap-4">
+                                <div className={`flex items-center gap-1 font-mono text-xl font-bold ${timeLeft < 10 ? 'text-red-500 animate-pulse-red' : 'text-slate-600'}`}>
+                                    <Icons.Clock className="w-5 h-5" />
+                                    {formatTime(timeLeft)}
+                                </div>
+                                <div className="font-black text-xl md:text-2xl text-blue-600 flex items-center gap-2">
+                                    <div className="text-sm font-normal text-slate-400">目前得分:</div>
+                                    {score}
+                                </div>
                             </div>
                         </div>
 
@@ -621,9 +697,15 @@
                                 </button>
                                 Level 2: 化學配對實驗室
                             </div>
-                            <div className="font-black text-xl md:text-2xl text-purple-600 flex items-center gap-2">
-                                <div className="text-sm font-normal text-slate-400">目前得分:</div>
-                                {score}
+                            <div className="flex items-center gap-4">
+                                <div className={`flex items-center gap-1 font-mono text-xl font-bold ${timeLeft < 10 ? 'text-red-500 animate-pulse-red' : 'text-slate-600'}`}>
+                                    <Icons.Clock className="w-5 h-5" />
+                                    {formatTime(timeLeft)}
+                                </div>
+                                <div className="font-black text-xl md:text-2xl text-purple-600 flex items-center gap-2">
+                                    <div className="text-sm font-normal text-slate-400">目前得分:</div>
+                                    {score}
+                                </div>
                             </div>
                         </div>
 
@@ -647,7 +729,7 @@
 
                             <div className="flex-1 bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col overflow-hidden">
                                 <h3 className="text-lg font-bold text-slate-500 mb-4 flex items-center gap-2 shrink-0"><Icons.CheckCircle className="w-5 h-5" /> 完成區 (中文/模型)</h3>
-                                <div className="space-y-3 overflow-y-auto pr-2 no-scrollbar">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto pr-2 no-scrollbar content-start">
                                     {matchingData.map(target => {
                                         const isMatched = matchedPairs[target.id];
                                         return (
