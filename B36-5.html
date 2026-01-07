@@ -1,0 +1,793 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, CheckCircle, XCircle, Award, ArrowRight, User, Hash, FlaskConical, Atom, GripVertical, RefreshCw, Beaker, Save, AlertTriangle, FastForward } from 'lucide-react';
+
+/**
+ * ============================================================================
+ * 【Google Apps Script 設定說明】
+ * * 若要啟用成績上傳功能，請按照以下步驟：
+ * 1. 建立一個 Google Sheet，第一列標題填入：timestamp, classId, seatId, level, score, mistakes
+ * 2. 點選「擴充功能」>「Apps Script」，貼上以下程式碼：
+ * * function doPost(e) {
+ * var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+ * var data = JSON.parse(e.postData.contents);
+ * sheet.appendRow([data.timestamp, data.classId, data.seatId, data.level, data.score, data.mistakes]);
+ * return ContentService.createTextOutput("Success");
+ * }
+ * * 3. 點選「部署」>「新增部署」> 類型選「網頁應用程式」> 存取權限選「所有人(Anyone)」。
+ * 4. 複製得到的 URL，填入下方的 GOOGLE_SCRIPT_URL 變數中。
+ * ============================================================================
+ */
+
+// 請將部署好的 Web App URL 填入下方引號中
+const GOOGLE_SCRIPT_URL = ""; 
+
+// --- SVG Components for Particle Models ---
+
+const AtomModel = ({ color = "#ef4444", label }) => (
+  <svg viewBox="0 0 50 50" className="w-10 h-10 md:w-12 md:h-12 inline-block drop-shadow-md">
+    <circle cx="25" cy="25" r="12" fill={color} stroke="#333" strokeWidth="1.5" />
+    <circle cx="20" cy="20" r="3" fill="white" fillOpacity="0.3" />
+    {label && <text x="25" y="25" textAnchor="middle" dy=".3em" fontSize="10" fill="white" fontWeight="bold">{label}</text>}
+  </svg>
+);
+
+const DiatomicModel = ({ color = "#3b82f6" }) => (
+  <svg viewBox="0 0 60 40" className="w-12 h-8 md:w-14 md:h-10 inline-block drop-shadow-md">
+    <g>
+      <circle cx="20" cy="20" r="10" fill={color} stroke="#333" strokeWidth="1.5" />
+      <circle cx="40" cy="20" r="10" fill={color} stroke="#333" strokeWidth="1.5" />
+    </g>
+  </svg>
+);
+
+const TriatomicModel = ({ color = "#ef4444" }) => (
+  <svg viewBox="0 0 60 50" className="w-12 h-10 md:w-14 md:h-12 inline-block drop-shadow-md">
+    <g transform="translate(5,5)">
+      <circle cx="10" cy="30" r="9" fill={color} stroke="#333" strokeWidth="1.5" />
+      <circle cx="25" cy="10" r="9" fill={color} stroke="#333" strokeWidth="1.5" />
+      <circle cx="40" cy="30" r="9" fill={color} stroke="#333" strokeWidth="1.5" />
+    </g>
+  </svg>
+);
+
+const WaterModel = () => (
+  <svg viewBox="0 0 50 50" className="w-10 h-10 md:w-12 md:h-12 inline-block drop-shadow-md">
+    <g transform="translate(5,5)">
+      <circle cx="10" cy="12" r="7" fill="#cbd5e1" stroke="#333" strokeWidth="1.5" />
+      <circle cx="38" cy="12" r="7" fill="#cbd5e1" stroke="#333" strokeWidth="1.5" />
+      <circle cx="24" cy="28" r="12" fill="#ef4444" stroke="#333" strokeWidth="1.5" />
+    </g>
+  </svg>
+);
+
+const LinearMolecule = ({ type = 'tri' }) => (
+  <svg viewBox="0 0 70 40" className="w-14 h-8 md:w-16 md:h-10 inline-block drop-shadow-md">
+    <g transform="translate(5,0)">
+      {type === 'tri' ? (
+        <>
+          <circle cx="10" cy="20" r="9" fill="#ef4444" stroke="#333" strokeWidth="1.5" />
+          <circle cx="30" cy="20" r="10" fill="#333" stroke="#333" strokeWidth="1.5" />
+          <circle cx="50" cy="20" r="9" fill="#ef4444" stroke="#333" strokeWidth="1.5" />
+        </>
+      ) : (
+        <>
+           <circle cx="20" cy="20" r="10" fill="#333" stroke="#333" strokeWidth="1.5" />
+           <circle cx="40" cy="20" r="9" fill="#ef4444" stroke="#333" strokeWidth="1.5" />
+        </>
+      )}
+    </g>
+  </svg>
+);
+
+const MixtureModel = ({ color = "#ef4444" }) => (
+  <svg viewBox="0 0 60 60" className="w-12 h-12 md:w-14 md:h-14 inline-block bg-white/50 rounded-full border border-dashed border-gray-400 p-1">
+    <circle cx="15" cy="15" r="5" fill={color} />
+    <circle cx="45" cy="45" r="5" fill={color} />
+    <circle cx="45" cy="15" r="6" fill="#3b82f6" />
+    <circle cx="15" cy="45" r="4" fill="#22c55e" />
+  </svg>
+);
+
+// --- Game Data ---
+
+const classificationData = [
+  // Elements
+  { id: 'c1', name: '氧氣', formula: 'O₂', type: 'element', icon: <DiatomicModel color="#3b82f6" /> },
+  { id: 'c4', name: '銅線', formula: 'Cu', type: 'element', icon: <AtomModel color="#d97706" /> },
+  { id: 'c7', name: '氦氣', formula: 'He', type: 'element', icon: <AtomModel color="#a855f7" /> },
+  { id: 'c9', name: '鐵釘', formula: 'Fe', type: 'element', icon: <AtomModel color="#64748b" /> },
+  { id: 'c10', name: '黃金', formula: 'Au', type: 'element', icon: <AtomModel color="#fbbf24" /> },
+  { id: 'c13', name: '鑽石', formula: 'C', type: 'element', icon: <AtomModel color="#bae6fd" /> },
+  { id: 'c18', name: '氬氣', formula: 'Ar', type: 'element', icon: <AtomModel color="#10b981" /> },
+  { id: 'c19', name: '臭氧', formula: 'O₃', type: 'element', icon: <TriatomicModel color="#3b82f6" /> },
+
+  // Compounds
+  { id: 'c2', name: '水', formula: 'H₂O', type: 'compound', icon: <WaterModel /> },
+  { id: 'c5', name: '二氧化碳', formula: 'CO₂', type: 'compound', icon: <LinearMolecule type="tri" /> },
+  { id: 'c8', name: '食鹽(氯化鈉)', formula: 'NaCl', type: 'compound', icon: <div className="flex gap-1 items-center"><AtomModel color="#22c55e" label="Cl" /><AtomModel color="#64748b" label="Na" /></div> },
+  { id: 'c11', name: '純酒精', formula: 'C₂H₅OH', type: 'compound', icon: <FlaskConical className="w-10 h-10 text-purple-400" /> },
+  { id: 'c14', name: '乾冰', formula: 'CO₂', type: 'compound', icon: <div className="relative"><LinearMolecule type="tri" /><span className="absolute -top-2 -right-2 text-xs">💨</span></div> },
+  { id: 'c15', name: '氨氣', formula: 'NH₃', type: 'compound', icon: <AtomModel color="#fcd34d" label="N" /> },
+  { id: 'c20', name: '一氧化碳', formula: 'CO', type: 'compound', icon: <LinearMolecule type="di" /> },
+
+  // Mixtures
+  { id: 'c3', name: '空氣', formula: 'Air', type: 'mixture', icon: <MixtureModel /> },
+  { id: 'c6', name: '糖水', formula: 'Sugar Water', type: 'mixture', icon: <Beaker className="w-10 h-10 text-orange-400" /> },
+  { id: 'c12', name: '鹽酸', formula: 'HCl(aq)', type: 'mixture', icon: <FlaskConical className="w-10 h-10 text-yellow-500" /> },
+  { id: 'c16', name: '雙氧水', formula: 'H₂O₂(aq)', type: 'mixture', icon: <FlaskConical className="w-10 h-10 text-blue-300" /> },
+  { id: 'c17', name: '墨水', formula: 'Ink', type: 'mixture', icon: <div className="w-10 h-10 bg-black rounded-full border-2 border-gray-400 opacity-80" /> },
+];
+
+const matchingData = [
+  // Original 9 Items
+  { id: 'm1', formula: 'H₂O', name: '水', model: <WaterModel /> },
+  { id: 'm2', formula: 'CO₂', name: '二氧化碳', model: <LinearMolecule type="tri" /> },
+  { id: 'm3', formula: 'O₂', name: '氧氣', model: <DiatomicModel color="#3b82f6" /> },
+  { id: 'm4', formula: 'NaCl', name: '氯化鈉', model: <div className="flex items-center justify-center scale-75"><AtomModel color="#64748b" /><AtomModel color="#22c55e" /></div> },
+  { id: 'm5', formula: 'C₆H₁₂O₆', name: '葡萄糖', model: <span className="text-2xl">🍬</span> },
+  { id: 'm6', formula: 'Mg', name: '鎂', model: <AtomModel color="#94a3b8" label="Mg" /> },
+  { id: 'm7', formula: 'Ar', name: '氬氣', model: <AtomModel color="#10b981" label="Ar" /> },
+  { id: 'm8', formula: 'O₃', name: '臭氧', model: <TriatomicModel color="#3b82f6" /> },
+  { id: 'm9', formula: 'CO', name: '一氧化碳', model: <LinearMolecule type="di" /> },
+  
+  // New Items (Total 16)
+  { id: 'm10', formula: 'N₂', name: '氮氣', model: <DiatomicModel color="#94a3b8" /> },
+  { id: 'm11', formula: 'H₂', name: '氫氣', model: <DiatomicModel color="#cbd5e1" /> },
+  { id: 'm12', formula: 'Fe', name: '鐵', model: <AtomModel color="#475569" label="Fe" /> },
+  { id: 'm13', formula: 'Cu', name: '銅', model: <AtomModel color="#d97706" label="Cu" /> },
+  { id: 'm14', formula: 'Au', name: '金', model: <AtomModel color="#fbbf24" label="Au" /> },
+  { id: 'm15', formula: 'He', name: '氦氣', model: <AtomModel color="#a855f7" label="He" /> },
+  { id: 'm16', formula: 'Cl₂', name: '氯氣', model: <DiatomicModel color="#22c55e" /> },
+];
+
+export default function MatterQuizApp() {
+  const [screen, setScreen] = useState('welcome');
+  const [userInfo, setUserInfo] = useState({ classId: '', seatId: '' });
+  const [score, setScore] = useState(100);
+  const [mistakeHistory, setMistakeHistory] = useState([]); // 紀錄錯誤 { item: '水', wrong: '元素', correct: '化合物' }
+  const [submissionStatus, setSubmissionStatus] = useState('idle'); // idle, submitting, success, error
+  const [isCombinedSession, setIsCombinedSession] = useState(false); // Track if user is doing full run
+  
+  // Drag & Drop State
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [items, setItems] = useState([]);
+  const [droppedItems, setDroppedItems] = useState([]); 
+  const [matchedPairs, setMatchedPairs] = useState({});
+  const [feedback, setFeedback] = useState(null);
+
+  // Level 1: Bins
+  const bins = [
+    { id: 'element', label: '元素', color: 'bg-blue-50 border-blue-500 text-blue-800' },
+    { id: 'compound', label: '化合物', color: 'bg-green-50 border-green-500 text-green-800' },
+    { id: 'mixture', label: '混合物', color: 'bg-orange-50 border-orange-500 text-orange-800' },
+  ];
+
+  // --- Logic ---
+
+  const handleStart = () => {
+    if (userInfo.classId && userInfo.seatId) {
+      setScreen('levels');
+    } else {
+      alert("請輸入班級與座號！");
+    }
+  };
+
+  const initLevel1 = () => {
+    setItems([...classificationData].sort(() => Math.random() - 0.5));
+    setDroppedItems([]);
+    setScore(100); // Always restart score for Level 1
+    setMistakeHistory([]); // Always restart history
+    setIsCombinedSession(true); // Start of a combined session
+    setSubmissionStatus('idle');
+    setScreen('game-level-1');
+    setFeedback(null);
+  };
+
+  // Modified initLevel2 to handle continuation
+  const initLevel2 = (isContinuation = false) => {
+    setItems([...matchingData].sort(() => Math.random() - 0.5));
+    setMatchedPairs({});
+    
+    if (!isContinuation) {
+        // If independent start
+        setScore(100);
+        setMistakeHistory([]);
+        setIsCombinedSession(false);
+    }
+    // If continuing, keep score and history
+    
+    setSubmissionStatus('idle');
+    setScreen('game-level-2');
+    setFeedback(null);
+  };
+
+  // Google Sheet Submission Logic
+  const submitScore = async () => {
+    if (!GOOGLE_SCRIPT_URL) {
+      alert("請先設定 Google Apps Script URL (請見程式碼最上方說明) 才能啟用上傳功能。");
+      return;
+    }
+
+    setSubmissionStatus('submitting');
+    
+    // Determine Level Label
+    let levelLabel = 'Level 2 Only';
+    if (screen === 'summary-1') levelLabel = 'Level 1 Only';
+    if (screen === 'summary-2' && isCombinedSession) levelLabel = 'Full Challenge (L1+L2)';
+
+    // Data payload
+    const data = {
+      timestamp: new Date().toISOString(),
+      classId: userInfo.classId,
+      seatId: userInfo.seatId,
+      level: levelLabel,
+      score: score,
+      mistakes: JSON.stringify(mistakeHistory.map(m => m.item))
+    };
+
+    try {
+      // Use no-cors mode for simple submission to Google Apps Script
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+      });
+      setSubmissionStatus('success');
+    } catch (error) {
+      console.error("Submission error", error);
+      setSubmissionStatus('error');
+    }
+  };
+
+  // Drag Handlers
+  const handleDragStart = (e, item) => {
+    setDraggedItem(item);
+    e.dataTransfer.setData('text/plain', item.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  // Level 1 Drop Logic
+  const handleDropLevel1 = (e, binType) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+
+    if (draggedItem.type === binType) {
+      // Correct
+      setDroppedItems(prev => [...prev, draggedItem]);
+      setItems(prev => prev.filter(i => i.id !== draggedItem.id));
+      setFeedback({ type: 'success', msg: '答對了！' });
+      // Score doesn't increase, starts at 100
+      setTimeout(() => setFeedback(null), 800);
+      
+      // Check if finished
+      if (items.length <= 1) { 
+         setTimeout(() => setScreen('summary-1'), 1500);
+      }
+    } else {
+      // Incorrect
+      setScore(prev => Math.max(0, prev - 2)); // Deduct 2 points
+      setFeedback({ type: 'error', msg: '分類錯誤，扣 2 分！' });
+      
+      // Record Mistake
+      const binLabel = bins.find(b => b.id === binType).label;
+      const correctLabel = bins.find(b => b.id === draggedItem.type).label;
+      
+      setMistakeHistory(prev => [
+        ...prev, 
+        { 
+          item: draggedItem.name, 
+          wrong: binLabel, 
+          correct: correctLabel 
+        }
+      ]);
+      
+      setTimeout(() => setFeedback(null), 1500);
+    }
+    setDraggedItem(null);
+  };
+
+  // Level 2 Drop Logic
+  const handleDropLevel2 = (e, targetId) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+
+    if (draggedItem.id === targetId) {
+      // Correct
+      setMatchedPairs(prev => ({ ...prev, [targetId]: draggedItem }));
+      setItems(prev => prev.filter(i => i.id !== draggedItem.id));
+      setFeedback({ type: 'success', msg: '配對成功！' });
+      setTimeout(() => setFeedback(null), 800);
+
+       // Check if finished
+      if (items.length <= 1) {
+         setTimeout(() => setScreen('summary-2'), 1500);
+      }
+    } else {
+      // Incorrect
+      setScore(prev => Math.max(0, prev - 2));
+      setFeedback({ type: 'error', msg: '配對錯誤，扣 2 分！' });
+      
+      // Record Mistake
+      const targetName = matchingData.find(m => m.id === targetId).name;
+      const correctTarget = matchingData.find(m => m.id === draggedItem.id).name;
+      
+      setMistakeHistory(prev => [
+        ...prev, 
+        { 
+          item: draggedItem.formula, 
+          wrong: `配對給 ${targetName}`, 
+          correct: correctTarget 
+        }
+      ]);
+
+      setTimeout(() => setFeedback(null), 1500);
+    }
+    setDraggedItem(null);
+  };
+
+  // Common Click Handlers
+  const handleItemClick = (item) => {
+    if (draggedItem && draggedItem.id === item.id) {
+      setDraggedItem(null); 
+    } else {
+      setDraggedItem(item); 
+    }
+  };
+
+  const handleBinClick = (binType) => {
+    if (draggedItem) {
+      if (draggedItem.type === binType) {
+        // ... (reuse logic from drop)
+        setDroppedItems(prev => [...prev, draggedItem]);
+        setItems(prev => prev.filter(i => i.id !== draggedItem.id));
+        setFeedback({ type: 'success', msg: '答對了！' });
+        setTimeout(() => setFeedback(null), 800);
+        if (items.length <= 1) setTimeout(() => setScreen('summary-1'), 1500);
+      } else {
+        // ... (reuse logic)
+        setScore(prev => Math.max(0, prev - 2));
+        const binLabel = bins.find(b => b.id === binType).label;
+        const correctLabel = bins.find(b => b.id === draggedItem.type).label;
+        setMistakeHistory(prev => [...prev, { item: draggedItem.name, wrong: binLabel, correct: correctLabel }]);
+        setFeedback({ type: 'error', msg: '分類錯誤，扣 2 分！' });
+        setTimeout(() => setFeedback(null), 1500);
+      }
+      setDraggedItem(null);
+    }
+  };
+
+  const handleSlotClick = (targetId) => {
+    if (draggedItem) {
+      if (draggedItem.id === targetId) {
+        setMatchedPairs(prev => ({ ...prev, [targetId]: draggedItem }));
+        setItems(prev => prev.filter(i => i.id !== draggedItem.id));
+        setFeedback({ type: 'success', msg: '配對成功！' });
+        setTimeout(() => setFeedback(null), 800);
+        if (items.length <= 1) setTimeout(() => setScreen('summary-2'), 1500);
+      } else {
+         setScore(prev => Math.max(0, prev - 2));
+         const targetName = matchingData.find(m => m.id === targetId).name;
+         const correctTarget = matchingData.find(m => m.id === draggedItem.id).name;
+         setMistakeHistory(prev => [...prev, { item: draggedItem.formula, wrong: `配對給 ${targetName}`, correct: correctTarget }]);
+         setFeedback({ type: 'error', msg: '配對錯誤，扣 2 分！' });
+         setTimeout(() => setFeedback(null), 1500);
+      }
+      setDraggedItem(null);
+    }
+  }
+
+
+  // --- Render Components ---
+
+  const FeedbackToast = () => (
+    <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-lg font-bold text-lg transition-all duration-300 z-50 flex items-center gap-2 ${
+      feedback?.type === 'success' ? 'bg-green-500 text-white scale-110' : 
+      feedback?.type === 'error' ? 'bg-red-500 text-white animate-pulse' : 'opacity-0'
+    }`}>
+      {feedback?.type === 'success' ? <CheckCircle /> : <XCircle />}
+      {feedback?.msg}
+    </div>
+  );
+
+  const SummaryScreen = ({ title, isIntermediate = false }) => (
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+      <div className="bg-white max-w-2xl w-full rounded-2xl shadow-xl overflow-hidden p-8">
+        <div className="text-center mb-8">
+          <Award size={64} className="mx-auto text-yellow-500 mb-4" />
+          <h2 className="text-3xl font-black text-slate-800">{title} 完成！</h2>
+          <div className="mt-4 text-6xl font-black text-indigo-600 tracking-tight">
+            {score} <span className="text-2xl text-slate-400">分</span>
+          </div>
+          {isIntermediate && (
+             <p className="text-slate-500 mt-2 font-bold">目前分數 (將帶入下一關)</p>
+          )}
+        </div>
+
+        {/* Mistake Report */}
+        <div className="mb-8">
+          <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+            <AlertTriangle size={20} className="text-orange-500" />
+            {isIntermediate ? "本關學習回饋" : "完整學習回饋"}
+          </h3>
+          {mistakeHistory.length === 0 ? (
+            <div className="bg-green-50 text-green-700 p-4 rounded-xl text-center font-bold">
+              太棒了！挑戰完全正確，沒有失誤！
+            </div>
+          ) : (
+            <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden max-h-60 overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-100 text-slate-500 sticky top-0">
+                  <tr>
+                    <th className="p-3">題目</th>
+                    <th className="p-3">你的回答</th>
+                    <th className="p-3">正確答案</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mistakeHistory.map((m, idx) => (
+                    <tr key={idx} className="border-t border-slate-200">
+                      <td className="p-3 font-bold text-slate-700">{m.item}</td>
+                      <td className="p-3 text-red-500">{m.wrong}</td>
+                      <td className="p-3 text-green-600 font-bold">{m.correct}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="p-3 bg-red-50 text-red-600 text-xs text-center border-t border-red-100">
+                目前共答錯 {mistakeHistory.length} 次，扣 {mistakeHistory.length * 2} 分
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Intermediate (Level 1 End) Actions */}
+          {isIntermediate ? (
+             <>
+               <button 
+                 onClick={() => initLevel2(true)} // Continue with keeping score
+                 className="col-span-2 bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold text-xl shadow-lg flex items-center justify-center gap-2 animate-pulse"
+               >
+                 <FastForward fill="currentColor" /> 挑戰第二關 (Level 2)
+               </button>
+               {/* Hidden option to quit early if really needed, but encouraged to continue */}
+               <button 
+                 onClick={() => setScreen('levels')}
+                 className="col-span-2 text-slate-400 text-sm hover:text-slate-600"
+               >
+                 暫停並返回選單
+               </button>
+             </>
+          ) : (
+             /* Final Actions */
+             <>
+                <button 
+                    onClick={submitScore}
+                    disabled={submissionStatus === 'success' || submissionStatus === 'submitting'}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-white transition
+                    ${submissionStatus === 'success' ? 'bg-green-500 cursor-default' : 
+                        submissionStatus === 'submitting' ? 'bg-gray-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'}
+                    `}
+                >
+                    {submissionStatus === 'idle' && <><Save size={20} /> 上傳總成績</>}
+                    {submissionStatus === 'submitting' && <RefreshCw className="animate-spin" />}
+                    {submissionStatus === 'success' && <><CheckCircle /> 上傳成功</>}
+                    {submissionStatus === 'error' && <><XCircle /> 上傳失敗(請重試)</>}
+                </button>
+                
+                <button 
+                    onClick={() => setScreen('levels')}
+                    className="border-2 border-slate-200 hover:bg-slate-50 text-slate-600 py-3 rounded-xl font-bold transition"
+                >
+                    回到選單
+                </button>
+             </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Screen: Welcome
+  if (screen === 'welcome') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+        <div className="bg-white/95 backdrop-blur-sm max-w-md w-full rounded-3xl shadow-2xl overflow-hidden border-4 border-white/50">
+          <div className="bg-slate-800 p-8 text-center text-white relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-full opacity-10">
+              <svg className="w-full h-full" viewBox="0 0 100 100">
+                <circle cx="20" cy="20" r="15" fill="white" />
+                <circle cx="80" cy="80" r="20" fill="white" />
+              </svg>
+            </div>
+            <h1 className="text-4xl font-black mb-2 tracking-tight relative z-10">理化大挑戰</h1>
+            <p className="text-indigo-200 font-medium relative z-10">物質分類 & 化學配對</p>
+            <div className="mt-4 inline-block bg-white/20 px-3 py-1 rounded-full text-xs font-light tracking-wider">
+              Sleeping 老師與 Gemini 共編
+            </div>
+          </div>
+          
+          <div className="p-8 space-y-6">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-bold text-gray-600 mb-1 flex items-center gap-2">
+                  <User size={18} /> 班級
+                </label>
+                <input
+                  type="text"
+                  placeholder="例如: 201"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:bg-white outline-none transition font-bold text-lg text-gray-700"
+                  value={userInfo.classId}
+                  onChange={(e) => setUserInfo({ ...userInfo, classId: e.target.value })}
+                />
+              </div>
+              
+              <div>
+                <label className="text-sm font-bold text-gray-600 mb-1 flex items-center gap-2">
+                  <Hash size={18} /> 座號
+                </label>
+                <input
+                  type="text"
+                  placeholder="例如: 0511"
+                  className="w-full px-4 py-3 bg-gray-50 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:bg-white outline-none transition font-bold text-lg text-gray-700"
+                  value={userInfo.seatId}
+                  onChange={(e) => setUserInfo({ ...userInfo, seatId: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleStart}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xl font-bold py-4 rounded-2xl transition shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transform hover:scale-[1.02] active:scale-95"
+            >
+              開始遊戲 <Play fill="currentColor" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Screen: Levels
+  if (screen === 'levels') {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="max-w-4xl w-full">
+          <header className="mb-10 text-center">
+            <h2 className="text-3xl font-black text-slate-800 mb-2">選擇挑戰模式</h2>
+            <div className="inline-block bg-white px-4 py-1 rounded-full shadow-sm text-slate-500 font-medium">
+              {userInfo.classId}班 {userInfo.seatId}號
+            </div>
+          </header>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            <button 
+              onClick={initLevel1}
+              className="group bg-white p-8 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 border-b-8 border-blue-500 hover:-translate-y-2 relative overflow-hidden text-left"
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-100 rounded-bl-full opacity-50 transition group-hover:scale-110"></div>
+              <div className="relative z-10">
+                <span className="bg-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full mb-4 inline-block">完整挑戰 (推薦)</span>
+                <h3 className="text-2xl font-bold text-slate-800 mb-2">全能挑戰賽</h3>
+                <p className="text-slate-500 mb-6">
+                  從第一關開始，一路過關斬將！<br/>
+                  (總分100，每答錯一次扣2分，分數跨關卡累積)
+                </p>
+                <div className="flex items-center gap-2 text-blue-600 font-bold">
+                  開始挑戰 <ArrowRight size={20} />
+                </div>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => initLevel2(false)} // false = independent start
+              className="group bg-white p-8 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 border-b-8 border-purple-500 hover:-translate-y-2 relative overflow-hidden text-left opacity-80 hover:opacity-100"
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-100 rounded-bl-full opacity-50 transition group-hover:scale-110"></div>
+              <div className="relative z-10">
+                <span className="bg-purple-500 text-white text-xs font-bold px-3 py-1 rounded-full mb-4 inline-block">單關練習</span>
+                <h3 className="text-2xl font-bold text-slate-800 mb-2">化學配對實驗室</h3>
+                <p className="text-slate-500 mb-6">
+                   僅練習第二關化學式配對。<br/>
+                   (分數獨立計算，不會列入總挑戰成績)
+                </p>
+                <div className="flex items-center gap-2 text-purple-600 font-bold">
+                  開始練習 <ArrowRight size={20} />
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <div className="text-center mt-12">
+            <button onClick={() => setScreen('welcome')} className="text-slate-400 hover:text-slate-600 font-medium">返回首頁</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Summary Screens
+  // Level 1 Summary: Intermediate screen, pass isIntermediate=true
+  if (screen === 'summary-1') return <SummaryScreen title="第一關：物質分類" isIntermediate={true} />;
+  // Level 2 Summary: Final screen
+  if (screen === 'summary-2') return <SummaryScreen title="全挑戰" isIntermediate={false} />;
+
+  // Screen: Game Level 1 (Classification)
+  if (screen === 'game-level-1') {
+    const isFinished = items.length === 0; // Though logic handles summary screen, keep safe check
+
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col relative overflow-hidden">
+        {feedback && <FeedbackToast />}
+        
+        {/* Header */}
+        <div className="bg-white shadow-sm p-3 md:p-4 flex justify-between items-center z-10 shrink-0">
+          <div className="font-bold text-slate-700 flex items-center gap-2">
+            <button onClick={() => setScreen('levels')} className="hover:bg-slate-100 p-2 rounded-lg">
+               <ArrowRight className="rotate-180" />
+            </button>
+            Level 1: 物質分類工廠
+          </div>
+          <div className="font-black text-xl md:text-2xl text-blue-600 flex items-center gap-2">
+            <div className="text-sm font-normal text-slate-400">目前得分:</div>
+            {score}
+          </div>
+        </div>
+
+        {/* Game Area */}
+        <div className="flex-1 p-2 md:p-4 flex flex-col max-w-6xl mx-auto w-full h-full">
+          
+          {/* Item Area */}
+          <div className="shrink-0 min-h-[140px] md:min-h-[180px] mb-4 bg-slate-100 rounded-2xl border-2 border-slate-200 border-dashed relative flex items-center justify-center p-4">
+             <div className="flex gap-4 overflow-x-auto pb-2 w-full justify-center">
+                {items.slice(0, 5).map((item) => (
+                  <div
+                    key={item.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item)}
+                    onClick={() => handleItemClick(item)}
+                    className={`bg-white rounded-xl shadow-md border-b-4 p-3 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing transition-all transform hover:-translate-y-1 min-w-[100px] md:min-w-[120px] h-[120px] md:h-[140px]
+                      ${draggedItem?.id === item.id ? 'border-blue-500 ring-4 ring-blue-200 scale-105 rotate-2' : 'border-slate-200'}
+                    `}
+                  >
+                    <div className="mb-2 scale-90 md:scale-100 pointer-events-none">{item.icon}</div>
+                    <div className="font-bold text-slate-800 text-sm md:text-base text-center leading-tight">{item.name}</div>
+                    <div className="text-slate-400 text-xs font-mono mt-1">{item.formula}</div>
+                  </div>
+                ))}
+              </div>
+             <div className="absolute bottom-2 right-4 text-xs text-slate-400">待分類: {items.length}</div>
+          </div>
+
+          {/* Bins Area */}
+          <div className="flex-1 grid grid-cols-3 gap-2 md:gap-4 min-h-0">
+             {bins.map((bin) => {
+               const itemsInBin = droppedItems.filter(i => i.type === bin.id);
+               return (
+                 <div
+                   key={bin.id}
+                   onDragOver={handleDragOver}
+                   onDrop={(e) => handleDropLevel1(e, bin.id)}
+                   onClick={() => handleBinClick(bin.id)}
+                   className={`${bin.color} rounded-2xl border-2 md:border-4 flex flex-col overflow-hidden transition-all relative ${draggedItem ? 'hover:brightness-95 cursor-pointer ring-2 ring-offset-2 ring-indigo-200' : ''}`}
+                 >
+                   <div className="bg-white/50 p-2 text-center border-b border-black/5">
+                      <div className="text-lg md:text-2xl font-black opacity-80">{bin.label}</div>
+                      <div className="text-xs opacity-60 font-medium">{itemsInBin.length} 個</div>
+                   </div>
+                   <div className="flex-1 p-2 content-start flex flex-wrap content-start gap-1 md:gap-2 overflow-y-auto">
+                      {itemsInBin.map((item) => (
+                        <div key={item.id} className="bg-white/80 rounded-md p-1 px-2 text-xs font-bold shadow-sm flex items-center gap-1 animate-in zoom-in duration-300">
+                           <span className="w-2 h-2 rounded-full bg-current opacity-50"></span>
+                           {item.name}
+                        </div>
+                      ))}
+                      {draggedItem && (
+                        <div className="w-full h-full absolute inset-0 bg-white/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+                           <span className="text-4xl animate-bounce">⬇️</span>
+                        </div>
+                      )}
+                   </div>
+                 </div>
+               );
+             })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Screen: Game Level 2 (Matching)
+  if (screen === 'game-level-2') {
+    const targets = matchingData; 
+
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+         {feedback && <FeedbackToast />}
+
+         <div className="bg-white shadow-sm p-4 flex justify-between items-center z-10">
+          <div className="font-bold text-slate-700 flex items-center gap-2">
+            <button onClick={() => setScreen('levels')} className="hover:bg-slate-100 p-2 rounded-lg">
+               <ArrowRight className="rotate-180" />
+            </button>
+            Level 2: 化學配對實驗室
+          </div>
+          <div className="font-black text-xl md:text-2xl text-purple-600 flex items-center gap-2">
+            <div className="text-sm font-normal text-slate-400">目前得分:</div>
+            {score}
+          </div>
+        </div>
+
+        <div className="flex-1 p-4 max-w-6xl mx-auto w-full flex flex-col md:flex-row gap-6">
+            
+            {/* Source Area */}
+            <div className="flex-1 bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col overflow-hidden">
+               <h3 className="text-lg font-bold text-slate-500 mb-4 flex items-center gap-2 shrink-0"><FlaskConical /> 待配對化學式</h3>
+               <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 content-start overflow-y-auto pr-2">
+                  {items.map(item => (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, item)}
+                      onClick={() => handleItemClick(item)}
+                      className={`p-4 rounded-xl border-2 bg-slate-50 text-center cursor-grab active:cursor-grabbing hover:bg-white hover:shadow-md transition
+                         ${draggedItem?.id === item.id ? 'border-purple-500 bg-purple-50 scale-105 ring-2 ring-purple-200' : 'border-slate-200'}
+                      `}
+                    >
+                       <div className="font-mono text-xl font-bold text-slate-700">{item.formula}</div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+
+            {/* Target Area */}
+            <div className="flex-1 bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col overflow-hidden">
+                <h3 className="text-lg font-bold text-slate-500 mb-4 flex items-center gap-2 shrink-0"><CheckCircle /> 完成區 (中文/模型)</h3>
+                <div className="space-y-3 overflow-y-auto pr-2">
+                   {targets.map(target => {
+                     const isMatched = matchedPairs[target.id];
+                     return (
+                       <div
+                         key={target.id}
+                         onDragOver={handleDragOver}
+                         onDrop={(e) => handleDropLevel2(e, target.id)}
+                         onClick={() => handleSlotClick(target.id)}
+                         className={`p-3 rounded-xl border-2 flex items-center justify-between transition-all
+                            ${isMatched 
+                               ? 'bg-green-50 border-green-200 opacity-80' 
+                               : draggedItem 
+                                  ? 'border-purple-300 bg-purple-50 cursor-pointer border-dashed' 
+                                  : 'border-slate-100 bg-slate-50'}
+                         `}
+                       >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 flex items-center justify-center bg-white rounded-lg shadow-sm border border-slate-100">
+                              {target.model}
+                            </div>
+                            <span className="font-bold text-slate-700">{target.name}</span>
+                          </div>
+                          <div className={`px-4 py-2 rounded-lg font-mono font-bold min-w-[80px] text-center transition-all
+                             ${isMatched ? 'bg-green-500 text-white scale-110 shadow-sm' : 'bg-slate-200 text-slate-400'}
+                          `}>
+                             {isMatched ? isMatched.formula : '?'}
+                          </div>
+                       </div>
+                     );
+                   })}
+                </div>
+            </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <div>Loading...</div>;
+}
